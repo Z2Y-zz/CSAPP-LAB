@@ -321,9 +321,13 @@ int mm_init () {
 void* mm_malloc (size_t size) {
   size_t reqSize;
   BlockInfo * ptrFreeBlock = NULL;
+  BlockInfo * nextFreeBlock = NULL;
   size_t blockSize;
+  size_t newSize;
   size_t precedingBlockUseTag;
-
+  size_t * nextBlockFootTag;
+  size_t chunkSize = 1<<10;
+  size_t extendSize;
   // Zero-size requests get NULL.
   if (size == 0) {
     return NULL;
@@ -345,7 +349,36 @@ void* mm_malloc (size_t size) {
   // Implement mm_malloc.  You can change or remove any of the above
   // code.  It is included as a suggestion of where to start.
   // You will want to replace this return statement...
-  return NULL; }
+  ptrFreeBlock = searchFreeList(reqSize);
+  
+  if (ptrFreeBlock == NULL) {
+    requestMoreSpace(reqSize);
+    ptrFreeBlock = searchFreeList(reqSize);
+  }
+
+
+  blockSize = SIZE(ptrFreeBlock->sizeAndTags);
+  precedingBlockUseTag = ptrFreeBlock->sizeAndTags & TAG_PRECEDING_USED;
+
+  if (blockSize - reqSize >= MIN_BLOCK_SIZE) {
+    ptrFreeBlock->sizeAndTags = reqSize | TAG_USED | precedingBlockUseTag;
+    nextFreeBlock = (BlockInfo*)POINTER_ADD(ptrFreeBlock, reqSize);
+    nextFreeBlock->sizeAndTags = (blockSize - reqSize) | TAG_PRECEDING_USED;
+    nextBlockFootTag = (size_t *)POINTER_ADD(ptrFreeBlock, blockSize - WORD_SIZE);
+    *nextBlockFootTag = nextFreeBlock->sizeAndTags;
+    insertFreeBlock(nextFreeBlock);
+  }
+  else {
+    ptrFreeBlock->sizeAndTags = blockSize | TAG_USED | precedingBlockUseTag;
+    nextFreeBlock = (BlockInfo*)POINTER_ADD(ptrFreeBlock, blockSize);
+    nextFreeBlock->sizeAndTags = nextFreeBlock->sizeAndTags | TAG_PRECEDING_USED;
+    nextBlockFootTag = (size_t *)POINTER_ADD(nextFreeBlock, SIZE(nextFreeBlock->sizeAndTags) - WORD_SIZE);
+    *nextBlockFootTag = nextFreeBlock->sizeAndTags;
+  }
+  removeFreeBlock(ptrFreeBlock);
+
+  return POINTER_ADD(ptrFreeBlock, WORD_SIZE); 
+}
 
 /* Free the block referenced by ptr. */
 void mm_free (void *ptr) {
@@ -355,6 +388,19 @@ void mm_free (void *ptr) {
 
   // Implement mm_free.  You can change or remove the declaraions
   // above.  They are included as minor hints.
+  blockInfo = (BlockInfo*)POINTER_SUB(ptr, WORD_SIZE);
+  payloadSize = SIZE(blockInfo->sizeAndTags) - WORD_SIZE;
+
+  blockInfo->sizeAndTags = blockInfo->sizeAndTags & ~TAG_USED;
+  *(size_t*)POINTER_ADD(blockInfo, payloadSize) = blockInfo->sizeAndTags;
+
+  followingBlock = (BlockInfo*)POINTER_ADD(blockInfo, SIZE(blockInfo->sizeAndTags));
+  followingBlock->sizeAndTags = followingBlock->sizeAndTags & ~TAG_PRECEDING_USED;
+  if ((followingBlock->sizeAndTags & TAG_USED) == 0) {
+    *(size_t*)POINTER_ADD(followingBlock, SIZE(followingBlock->sizeAndTags) - WORD_SIZE) = followingBlock->sizeAndTags;
+  }
+  insertFreeBlock(blockInfo);
+  coalesceFreeBlock(blockInfo);
 
 }
 
